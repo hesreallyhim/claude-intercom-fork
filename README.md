@@ -4,7 +4,7 @@ Two-way communication bridge between Claude Code sessions using the [Channels AP
 
 Let two Claude Code instances on different machines talk to each other in real-time. One sends a message, the other receives it instantly as a channel notification and can reply back.
 
-<img width="2020" height="1084" alt="image" src="https://github.com/user-attachments/assets/679e8896-c4dd-4b7b-8066-f0f27b0e8ece" />
+<img width="1200" height="675" alt="intercom-demo" src="https://github.com/user-attachments/assets/15e4b671-3f66-4712-bf9b-482ba5f3d293" />
 
 
 ## Read this first: Claude Code has native cross-session messaging now
