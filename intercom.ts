@@ -31,8 +31,15 @@ import {
 // ── Configuration ──────────────────────────────────────────────────────
 // All config via environment variables — no hardcoded values.
 
+/** The placeholder that ships in the docs. Never a valid runtime secret. */
+const PLACEHOLDER_SECRETS = new Set([
+  'change-me-in-production',
+  'your-shared-secret',
+  'your-shared-secret-here',
+])
+
 /** Shared secret for authenticating messages between instances */
-const SECRET = process.env.INTERCOM_SECRET || 'change-me-in-production'
+const SECRET = process.env.INTERCOM_SECRET ?? ''
 
 /** The remote machine's address (IP:port, hostname:port, or tunnel URL) */
 const REMOTE_HOST = process.env.REMOTE_HOST || 'localhost:8789'
@@ -45,6 +52,33 @@ const PORT = parseInt(process.env.INTERCOM_PORT || '8788', 10)
 
 /** How long an outbound POST may hang before we give up on it */
 const SEND_TIMEOUT_MS = parseInt(process.env.INTERCOM_SEND_TIMEOUT_MS || '10000', 10)
+
+// ── Fail closed ────────────────────────────────────────────────────────
+// The secret is the only thing standing between a stranger and a write
+// channel into a live Claude Code session, and it used to default to a value
+// printed in this repo's README. A forgotten env var was therefore enough to
+// put a listener on 0.0.0.0 with a publicly known password.
+//
+// So there is no default any more. Rather than exiting — which would break
+// zero-config introspection, the reason the Dockerfile exists — an unpaired
+// intercom runs MCP-only: the tools are still listed, but nothing binds a
+// port and nothing can be sent. The failure is reported in the conversation,
+// where whoever misconfigured it is actually looking.
+
+const UNPAIRED_REASON =
+  SECRET === ''
+    ? 'INTERCOM_SECRET is not set'
+    : PLACEHOLDER_SECRETS.has(SECRET)
+      ? 'INTERCOM_SECRET is still one of the placeholder values from the docs'
+      : ''
+
+const PAIRING_ENABLED = UNPAIRED_REASON === ''
+
+/** What to tell Claude — and through it the user — when the tools can't work. */
+const UNPAIRED_MESSAGE =
+  `Intercom is not paired: ${UNPAIRED_REASON}. No port is being listened on and ` +
+  `no message can be sent. Set a strong shared secret to the same value on both ` +
+  `machines, e.g. INTERCOM_SECRET="$(openssl rand -base64 32)", then restart.`
 
 // ── Delivery state ─────────────────────────────────────────────────────
 // A POST returning 200 only proves the remote *process* took the message. It
@@ -208,6 +242,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       expectReplyWithin?: string
     }
 
+    if (!PAIRING_ENABLED) {
+      return {
+        content: [{ type: 'text' as const, text: UNPAIRED_MESSAGE }],
+        isError: true,
+      }
+    }
+
     const id = crypto.randomUUID().slice(0, 8)
     const budgetMs = parseBudget(expectReplyWithin)
     const entry: Tracked = {
@@ -326,66 +367,69 @@ await mcp.connect(new StdioServerTransport())
 // Receives messages from the remote machine and pushes them into the
 // local Claude Code session as channel notifications.
 
-Bun.serve({
-  port: PORT,
-  hostname: '0.0.0.0',
-  async fetch(req) {
-    const url = new URL(req.url)
+const handleRequest = async (req: Request): Promise<Response> => {
+  const url = new URL(req.url)
 
-    // Health check — useful for verifying the tunnel/connection
-    if (req.method === 'GET' && url.pathname === '/health') {
-      return new Response(
-        JSON.stringify({ status: 'ok', role: MY_ROLE, version: '2.0.0' }),
-        { headers: { 'Content-Type': 'application/json' } },
-      )
+  // Health check — useful for verifying the tunnel/connection
+  if (req.method === 'GET' && url.pathname === '/health') {
+    return new Response(JSON.stringify({ status: 'ok', role: MY_ROLE, version: '2.0.0' }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  // Message endpoint — receives messages from the other instance
+  if (req.method === 'POST' && url.pathname === '/message') {
+    // Authenticate: reject messages without the correct shared secret
+    const token = req.headers.get('X-Intercom-Secret')
+    if (token !== SECRET) {
+      return new Response('Unauthorized', { status: 401 })
     }
 
-    // Message endpoint — receives messages from the other instance
-    if (req.method === 'POST' && url.pathname === '/message') {
-      // Authenticate: reject messages without the correct shared secret
-      const token = req.headers.get('X-Intercom-Secret')
-      if (token !== SECRET) {
-        return new Response('Unauthorized', { status: 401 })
-      }
+    const data = (await req.json()) as {
+      id?: string
+      replyTo?: string
+      content: string
+      role: string
+      timestamp: string
+    }
 
-      const data = (await req.json()) as {
-        id?: string
-        replyTo?: string
-        content: string
-        role: string
-        timestamp: string
+    // If this answers something we sent, close that loop out.
+    if (data.replyTo) {
+      const original = outbound.get(data.replyTo)
+      if (original) {
+        original.status = 'answered'
+        original.answeredAt = Date.now()
       }
+    }
 
-      // If this answers something we sent, close that loop out.
-      if (data.replyTo) {
-        const original = outbound.get(data.replyTo)
-        if (original) {
-          original.status = 'answered'
-          original.answeredAt = Date.now()
-        }
-      }
-
-      // Push the message into Claude's conversation as a channel event.
-      // The id travels with it so Claude can set replyTo when it answers.
-      await mcp.notification({
-        method: 'notifications/claude/channel',
-        params: {
-          content: data.content,
-          meta: {
-            id: data.id,
-            replyTo: data.replyTo,
-            role: data.role,
-            timestamp: data.timestamp,
-          },
+    // Push the message into Claude's conversation as a channel event.
+    // The id travels with it so Claude can set replyTo when it answers.
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: data.content,
+        meta: {
+          id: data.id,
+          replyTo: data.replyTo,
+          role: data.role,
+          timestamp: data.timestamp,
         },
-      })
+      },
+    })
 
-      return new Response('ok')
-    }
+    return new Response('ok')
+  }
 
-    return new Response('Not Found', { status: 404 })
-  },
-})
+  return new Response('Not Found', { status: 404 })
+}
 
-console.error(`[intercom] ${MY_ROLE} listening on port ${PORT}`)
-console.error(`[intercom] Remote: ${REMOTE_HOST}`)
+// An unpaired intercom binds nothing at all. The tools stay listed so that
+// registry introspection still works, but they report why they are inert.
+if (PAIRING_ENABLED) {
+  Bun.serve({ port: PORT, hostname: '0.0.0.0', fetch: handleRequest })
+  console.error(`[intercom] ${MY_ROLE} listening on port ${PORT}`)
+  console.error(`[intercom] Remote: ${REMOTE_HOST}`)
+} else {
+  console.error(`[intercom] ${UNPAIRED_MESSAGE}`)
+  console.error('[intercom] Running MCP-only: no port bound, tools inert.')
+}
