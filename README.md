@@ -270,6 +270,8 @@ The stdio leg is not an implementation detail you can swap for HTTP. It is what 
 
 `id` and `replyTo` are optional — a message without them still delivers, it just can't be correlated.
 
+The body is schema-validated before anything reaches your session. `content` is required and capped at 32,000 characters; `id` and `replyTo` must look like machine ids (`[A-Za-z0-9_-]`, ≤64); `role` and `timestamp` may not contain `< > " '` or any Unicode control, zero-width, or bidi-override character, because those are what a sender would use to forge the `<channel …>` wrapper the message is rendered inside. Anything else gets a `400`, and a body over 64 KB gets a `413`.
+
 ## Use Cases
 
 - **Backend + Frontend collaboration**: Backend Claude answers API questions from frontend Claude using the actual codebase

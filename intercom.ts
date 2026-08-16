@@ -22,6 +22,7 @@
  * @see https://code.claude.com/docs/en/channels-reference
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { z } from 'zod'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -99,6 +100,38 @@ const SECRET_DIGEST = digest(SECRET)
 
 const authorized = (token: string | null): boolean =>
   token !== null && timingSafeEqual(digest(token), SECRET_DIGEST)
+
+// ── Inbound payload ────────────────────────────────────────────────────
+// Everything here ends up in a live Claude Code conversation, so it is parsed
+// rather than cast. Two things are being defended against, both from a peer
+// that already holds the secret:
+//
+//   - `role` and `id` are rendered into the <channel source="intercom"
+//     role="..." id="..."> wrapper. Angle brackets, quotes and newlines in
+//     them let a sender forge that wrapper and dress a message up as
+//     something with more authority than a message from another developer.
+//   - `content` with no ceiling is a way to flood the receiving session's
+//     context with a single POST.
+//
+// Deliberately not an allowlist of "safe" role characters: roles are labels
+// people choose, and rejecting `backend/api` would be a regression. Only the
+// characters that break the wrapper are excluded.
+
+// Excludes tag/attribute punctuation and every Unicode "Other" character:
+// C0 controls, but also zero-width and bidi-override chars used for spoofing.
+const SAFE_TEXT = /^[^<>"'\p{C}]+$/u
+const MACHINE_ID = /^[A-Za-z0-9_-]{1,64}$/
+
+const MAX_CONTENT_CHARS = 32_000
+const MAX_BODY_BYTES = 64 * 1024
+
+const InboundMessage = z.object({
+  id: z.string().regex(MACHINE_ID).optional(),
+  replyTo: z.string().regex(MACHINE_ID).optional(),
+  content: z.string().min(1).max(MAX_CONTENT_CHARS),
+  role: z.string().min(1).max(48).regex(SAFE_TEXT),
+  timestamp: z.string().max(64).regex(SAFE_TEXT).optional(),
+})
 
 // ── Delivery state ─────────────────────────────────────────────────────
 // A POST returning 200 only proves the remote *process* took the message. It
@@ -404,13 +437,29 @@ const handleRequest = async (req: Request): Promise<Response> => {
       return new Response('Unauthorized', { status: 401 })
     }
 
-    const data = (await req.json()) as {
-      id?: string
-      replyTo?: string
-      content: string
-      role: string
-      timestamp: string
+    // Reject oversized bodies before buffering them. Chunked requests arrive
+    // without a length, so the schema's ceiling is what actually enforces it.
+    const declaredLength = Number(req.headers.get('content-length') ?? 0)
+    if (declaredLength > MAX_BODY_BYTES) {
+      return new Response('Payload Too Large', { status: 413 })
     }
+
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      return new Response('Bad Request: body is not valid JSON', { status: 400 })
+    }
+
+    const parsed = InboundMessage.safeParse(body)
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]
+      const where = issue?.path.join('.') || 'body'
+      return new Response(`Bad Request: ${where} ${issue?.message ?? 'is invalid'}`, {
+        status: 400,
+      })
+    }
+    const data = parsed.data
 
     // If this answers something we sent, close that loop out.
     if (data.replyTo) {
