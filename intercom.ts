@@ -46,6 +46,17 @@ const SECRET = process.env.INTERCOM_SECRET ?? ''
 /** The remote machine's address (IP:port, hostname:port, or tunnel URL) */
 const REMOTE_HOST = process.env.REMOTE_HOST || 'localhost:8789'
 
+/**
+ * The scheme used to be guessed with REMOTE_HOST.includes('ngrok'), which
+ * silently sent the secret in cleartext to every other kind of TLS tunnel —
+ * a Cloudflare or Caddy address got http:// and simply failed. Write the
+ * scheme yourself and it is honoured; leave it off and it stays http, except
+ * for ngrok hostnames, which keep working as they always did.
+ */
+const REMOTE_BASE = /^https?:\/\//i.test(REMOTE_HOST)
+  ? REMOTE_HOST.replace(/\/+$/, '')
+  : `${REMOTE_HOST.includes('ngrok') ? 'https' : 'http'}://${REMOTE_HOST}`
+
 /** This instance's role — appears in message tags so Claude knows who's talking */
 const MY_ROLE = process.env.MY_ROLE || 'developer-a'
 
@@ -314,11 +325,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     remember(entry)
 
     try {
-      // Auto-detect protocol: tunnel URLs need HTTPS, direct IPs use HTTP
-      const protocol =
-        REMOTE_HOST.includes('ngrok') || REMOTE_HOST.includes('https') ? 'https' : 'http'
-
-      const resp = await fetch(`${protocol}://${REMOTE_HOST}/message`, {
+      const resp = await fetch(`${REMOTE_BASE}/message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -496,7 +503,7 @@ const handleRequest = async (req: Request): Promise<Response> => {
 if (PAIRING_ENABLED) {
   Bun.serve({ port: PORT, hostname: HOST, fetch: handleRequest })
   console.error(`[intercom] ${MY_ROLE} listening on ${HOST}:${PORT}`)
-  console.error(`[intercom] Remote: ${REMOTE_HOST}`)
+  console.error(`[intercom] Remote: ${REMOTE_BASE}`)
 } else {
   console.error(`[intercom] ${UNPAIRED_MESSAGE}`)
   console.error('[intercom] Running MCP-only: no port bound, tools inert.')
