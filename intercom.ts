@@ -50,6 +50,13 @@ const MY_ROLE = process.env.MY_ROLE || 'developer-a'
 /** Port to listen on for incoming messages */
 const PORT = parseInt(process.env.INTERCOM_PORT || '8788', 10)
 
+/**
+ * Interface to bind the listener to. Defaults to every interface, because the
+ * whole point is to be reachable from the other machine. Set 127.0.0.1 when a
+ * tunnel is doing the reaching, so nothing but the tunnel can connect.
+ */
+const HOST = process.env.INTERCOM_HOST || '0.0.0.0'
+
 /** How long an outbound POST may hang before we give up on it */
 const SEND_TIMEOUT_MS = parseInt(process.env.INTERCOM_SEND_TIMEOUT_MS || '10000', 10)
 
@@ -426,8 +433,8 @@ const handleRequest = async (req: Request): Promise<Response> => {
 // An unpaired intercom binds nothing at all. The tools stay listed so that
 // registry introspection still works, but they report why they are inert.
 if (PAIRING_ENABLED) {
-  Bun.serve({ port: PORT, hostname: '0.0.0.0', fetch: handleRequest })
-  console.error(`[intercom] ${MY_ROLE} listening on port ${PORT}`)
+  Bun.serve({ port: PORT, hostname: HOST, fetch: handleRequest })
+  console.error(`[intercom] ${MY_ROLE} listening on ${HOST}:${PORT}`)
   console.error(`[intercom] Remote: ${REMOTE_HOST}`)
 } else {
   console.error(`[intercom] ${UNPAIRED_MESSAGE}`)

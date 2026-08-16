@@ -168,7 +168,7 @@ Claude will use the `send_message` tool to POST the message to the other machine
 "REMOTE_HOST": "other-machine:8788"
 ```
 
-This is strictly better than exposing a port to the internet: no public listener, no port forwarding, the address doesn't change when your ISP reassigns your IP, and device identity is enforced by Tailscale rather than resting entirely on a shared string. Set `hostname` to `127.0.0.1` in `Bun.serve` if you want to be certain nothing outside the tailnet can reach it at all.
+This is strictly better than exposing a port to the internet: no public listener, no port forwarding, the address doesn't change when your ISP reassigns your IP, and device identity is enforced by Tailscale rather than resting entirely on a shared string. Set `INTERCOM_HOST` to your tailnet address — or to `127.0.0.1` if you are also fronting it with a tunnel — to be certain nothing outside can reach it at all.
 
 <details>
 <summary>Alternative: ngrok</summary>
@@ -224,6 +224,7 @@ Every message sits in one of three states:
 | `REMOTE_HOST` | Yes | `localhost:8789` | Address of the other machine (`host:port` or tunnel URL) |
 | `INTERCOM_SECRET` | Yes | *none* | Shared secret — must match on both sides. There is no default: if it is unset or left as a docs placeholder, the server refuses to start |
 | `INTERCOM_PORT` | No | `8788` | Port to listen on for incoming messages |
+| `INTERCOM_HOST` | No | `0.0.0.0` | Interface to bind the listener to. Use `127.0.0.1` when a tunnel fronts it |
 | `INTERCOM_SEND_TIMEOUT_MS` | No | `10000` | How long an outbound POST may hang before giving up |
 
 ## How It Works
@@ -244,7 +245,7 @@ The stdio leg is not an implementation detail you can swap for HTTP. It is what 
 - **No default secret**: `INTERCOM_SECRET` has no fallback value. Unset it, or leave a docs placeholder in place, and the process exits instead of starting a listener anyone could talk to.
 - **Inbound is treated as data, not instructions**: the server tells the receiving Claude that a channel message comes from another person's session — it can't approve anything, can't change configuration, a slash command in the text is inert, and requests for credentials or env files should be refused and surfaced to you.
 - **No data persistence**: Messages are forwarded in real-time and not stored.
-- **Localhost binding optional**: By default listens on `0.0.0.0` for cross-machine access. Set to `127.0.0.1` if using a tunnel.
+- **Configurable bind address**: By default listens on `0.0.0.0` for cross-machine access. Set `INTERCOM_HOST=127.0.0.1` when a tunnel is doing the reaching, so only the tunnel can connect.
 
 > **Warning**: Those instructions are a default, not a boundary. You cannot fix prompt injection with prompt instructions — anyone holding your secret and address can put text into your Claude session, and the only real limits are that session's own permission prompts. Native cross-session messaging enforces this properly with hold/accept/refuse inbound controls; this does not. Use a strong secret, keep it off the public internet, and don't pair with a peer you wouldn't hand a terminal to.
 
