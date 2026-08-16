@@ -1,16 +1,38 @@
 {
   "name": "claude-intercom",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "mcpName": "io.github.MuhammadTalhaMT/intercom",
   "description": "Two-way communication bridge between Claude Code sessions using the Channels API",
   "main": "intercom.ts",
+  "bin": {
+    "claude-intercom": "bin/claude-intercom.mjs"
+  },
+  "files": [
+    "intercom.ts",
+    "bin/",
+    "server.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
   "scripts": {
     "start": "bun run intercom.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MuhammadTalhaMT/claude-intercom.git"
+  },
+  "homepage": "https://github.com/MuhammadTalhaMT/claude-intercom#readme",
+  "bugs": {
+    "url": "https://github.com/MuhammadTalhaMT/claude-intercom/issues"
   },
   "keywords": [
     "claude",
     "claude-code",
     "channels",
     "mcp",
+    "modelcontextprotocol",
+    "mcp-server",
     "intercom",
     "collaboration",
     "developer-tools"

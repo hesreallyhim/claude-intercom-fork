@@ -1,0 +1,57 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.MuhammadTalhaMT/intercom",
+  "description": "Relays messages between two Claude Code sessions on different machines using the Channels API",
+  "repository": {
+    "url": "https://github.com/MuhammadTalhaMT/claude-intercom",
+    "source": "github"
+  },
+  "version": "2.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "claude-intercom",
+      "version": "2.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "MY_ROLE",
+          "description": "Label for this instance, e.g. backend or frontend. Appears in message tags so the other side knows who is talking.",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "REMOTE_HOST",
+          "description": "Address of the other machine as host:port. A Tailscale address is recommended over a public one.",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "INTERCOM_SECRET",
+          "description": "Shared secret authenticating messages between the two instances. Must match on both sides.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "INTERCOM_PORT",
+          "description": "Port to listen on for incoming messages. Defaults to 8788.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "number"
+        },
+        {
+          "name": "INTERCOM_SEND_TIMEOUT_MS",
+          "description": "How long an outbound POST may hang before giving up. Defaults to 10000.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "number"
+        }
+      ]
+    }
+  ]
+}
