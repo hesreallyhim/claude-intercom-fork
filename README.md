@@ -79,13 +79,22 @@ Both instances run the same `intercom.ts` file. Each listens for HTTP messages a
 
 ### 1. Install
 
-On **both machines**:
+Nothing to install. `npx` fetches it on first run, on both machines.
+
+You do need [Bun](https://bun.sh) on your PATH — the server uses `Bun.serve` for its HTTP listener, and the `npx` entry point hands off to it.
+
+<details>
+<summary>Prefer to run from source?</summary>
 
 ```bash
 git clone https://github.com/MuhammadTalhaMT/claude-intercom.git
 cd claude-intercom
 bun install
 ```
+
+Then use `"command": "bun"` with `"args": ["/path/to/claude-intercom/intercom.ts"]` in the config below instead of the `npx` form.
+
+</details>
 
 ### 2. Configure
 
@@ -97,8 +106,8 @@ Copy the example config into your project's `.mcp.json`:
 {
   "mcpServers": {
     "intercom": {
-      "command": "bun",
-      "args": ["/path/to/claude-intercom/intercom.ts"],
+      "command": "npx",
+      "args": ["-y", "claude-intercom"],
       "env": {
         "MY_ROLE": "backend",
         "REMOTE_HOST": "MACHINE_B_IP:8788",
@@ -116,8 +125,8 @@ Copy the example config into your project's `.mcp.json`:
 {
   "mcpServers": {
     "intercom": {
-      "command": "bun",
-      "args": ["/path/to/claude-intercom/intercom.ts"],
+      "command": "npx",
+      "args": ["-y", "claude-intercom"],
       "env": {
         "MY_ROLE": "frontend",
         "REMOTE_HOST": "MACHINE_A_IP:8788",
