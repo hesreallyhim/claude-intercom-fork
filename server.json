@@ -32,10 +32,11 @@
         },
         {
           "name": "INTERCOM_SECRET",
-          "description": "Shared secret authenticating messages between the two instances. Must match on both sides.",
+          "description": "Shared secret authenticating messages between the two instances. Must match on both sides. There is no default: without it the intercom starts unpaired, binds no port, and refuses to send.",
           "isRequired": true,
           "isSecret": true,
-          "format": "string"
+          "format": "string",
+          "placeholder": "output of: openssl rand -base64 32"
         },
         {
           "name": "INTERCOM_PORT",
