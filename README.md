@@ -67,13 +67,13 @@ Claude Code A                      Claude Code B
                    Claude A    Claude B
 ```
 
-Both instances run the same `intercom.ts` file. Each listens for HTTP messages and pushes them into its local Claude Code session via the Channels API. Each also exposes a `send_message` tool that Claude can call to send messages to the other machine.
+Both instances run the same `intercom.ts` file. Each listens for HTTP messages and pushes them into its local Claude Code session via the Channels API. Each also exposes `send_message` and `check_message` tools that Claude can call.
 
 ## Requirements
 
 - [Claude Code](https://claude.ai/claude-code) v2.1.80 or later
 - [Bun](https://bun.sh) runtime
-- Both machines must be able to reach each other over HTTP (direct IP, VPN, or [ngrok](https://ngrok.com))
+- Both machines must be able to reach each other over HTTP. [Tailscale](https://tailscale.com) is the recommended way — see [Connecting the two machines](#connecting-the-two-machines)
 
 ## Quick Start
 
@@ -145,33 +145,71 @@ In either Claude Code session:
 
 Claude will use the `send_message` tool to POST the message to the other machine. The other Claude receives it as a channel notification and responds.
 
-## Behind NAT / Dynamic IP?
+## Connecting the two machines
 
-If one machine is behind a router (home network, no public IP), use [ngrok](https://ngrok.com):
+**Use [Tailscale](https://tailscale.com).** Install it on both machines and they get stable private addresses on your own tailnet. Then point each side at the other's tailnet address:
+
+```json
+"REMOTE_HOST": "other-machine:8788"
+```
+
+This is strictly better than exposing a port to the internet: no public listener, no port forwarding, the address doesn't change when your ISP reassigns your IP, and device identity is enforced by Tailscale rather than resting entirely on a shared string. Set `hostname` to `127.0.0.1` in `Bun.serve` if you want to be certain nothing outside the tailnet can reach it at all.
+
+<details>
+<summary>Alternative: ngrok</summary>
+
+If you can't use Tailscale, [ngrok](https://ngrok.com) still works:
 
 ```bash
 # On the machine behind NAT
 ngrok http 8788
 ```
 
-Then set the other machine's `REMOTE_HOST` to the ngrok URL:
-
 ```json
 "REMOTE_HOST": "your-subdomain.ngrok-free.app"
 ```
 
-The intercom auto-detects ngrok URLs and switches to HTTPS.
+The intercom auto-detects ngrok URLs and switches to HTTPS. Note this does put a publicly reachable endpoint in front of your Claude session, gated only by the shared secret — pick a strong one.
 
-> **Tip:** ngrok's paid plan gives you a static subdomain that never changes, even after restart.
+</details>
+
+## Tools
+
+### `send_message`
+
+Sends a message and returns immediately with an **id**. It does not wait for an answer — the reply arrives later as its own inbound message.
+
+| Argument | Required | Description |
+|---|---|---|
+| `message` | Yes | The text to send |
+| `replyTo` | No | The id of the incoming message this answers, so the sender can correlate it |
+| `expectReplyWithin` | No | How long a reply should reasonably take: `"30s"`, `"5m"`, `"2h"` |
+
+The acknowledgement deliberately does not claim the other developer received it. An HTTP 200 proves the remote *process* accepted the message, not that the other Claude ever read it.
+
+### `check_message`
+
+Answers the question a fire-and-forget channel otherwise can't: is this reply slow, or is it never coming? Pass an `id`, or omit it to list everything outstanding.
+
+Every message sits in one of three states:
+
+| State | Meaning |
+|---|---|
+| `sent` | We tried, but the remote process never acked it. The other machine is probably unreachable |
+| `delivered-to-process` | Their intercom took it. Their Claude may or may not have read it — that session could be idle, closed, or out of usage |
+| `answered` | A reply came back carrying `replyTo` for this id |
+
+`expectReplyWithin` is what makes "overdue" mean anything, and it's **per message** rather than one global timeout — so a quick endpoint lookup and a long investigation aren't judged on the same clock.
 
 ## Configuration
 
 | Environment Variable | Required | Default | Description |
 |---------------------|----------|---------|-------------|
 | `MY_ROLE` | Yes | `developer-a` | Label for this instance (appears in message tags) |
-| `REMOTE_HOST` | Yes | `localhost:8789` | Address of the other machine (`IP:port` or ngrok URL) |
+| `REMOTE_HOST` | Yes | `localhost:8789` | Address of the other machine (`host:port` or tunnel URL) |
 | `INTERCOM_SECRET` | Yes | `change-me-in-production` | Shared secret — must match on both sides |
 | `INTERCOM_PORT` | No | `8788` | Port to listen on for incoming messages |
+| `INTERCOM_SEND_TIMEOUT_MS` | No | `10000` | How long an outbound POST may hang before giving up |
 
 ## How It Works
 
@@ -179,23 +217,41 @@ The intercom auto-detects ngrok URLs and switches to HTTPS.
 2. The script declares `claude/channel` capability — this registers it as a Channel
 3. It starts an HTTP server listening for incoming messages
 4. When a message arrives (authenticated via shared secret), it calls `mcp.notification()` with `method: 'notifications/claude/channel'`
-5. Claude Code surfaces the notification in the conversation as a `<channel>` tag
-6. Claude reads it and can reply using the `send_message` tool, which POSTs to the remote machine
+5. Claude Code surfaces the notification in the conversation as a `<channel>` tag, carrying the message id
+6. Claude reads it and can reply using `send_message` with `replyTo` set to that id, which POSTs to the remote machine
+7. The original sender matches the `replyTo` against its own outbound record and marks that message `answered`
+
+The stdio leg is not an implementation detail you can swap for HTTP. It is what attaches the server to a specific live Claude Code session — the `claude/channel` capability is registered over that connection, and it's the reason `mcp.notification()` lands in a conversation at all. Host this remotely and the notification goes to whatever MCP client connected instead.
 
 ## Security
 
 - **Shared secret authentication**: Every message requires an `X-Intercom-Secret` header matching the configured secret. Requests without it get a `401 Unauthorized`.
+- **Inbound is treated as data, not instructions**: the server tells the receiving Claude that a channel message comes from another person's session — it can't approve anything, can't change configuration, a slash command in the text is inert, and requests for credentials or env files should be refused and surfaced to you.
 - **No data persistence**: Messages are forwarded in real-time and not stored.
 - **Localhost binding optional**: By default listens on `0.0.0.0` for cross-machine access. Set to `127.0.0.1` if using a tunnel.
 
-> **Warning**: Don't use a weak or default secret in production. Anyone who knows your IP and secret can inject messages into your Claude session.
+> **Warning**: Those instructions are a default, not a boundary. You cannot fix prompt injection with prompt instructions — anyone holding your secret and address can put text into your Claude session, and the only real limits are that session's own permission prompts. Native cross-session messaging enforces this properly with hold/accept/refuse inbound controls; this does not. Use a strong secret, keep it off the public internet, and don't pair with a peer you wouldn't hand a terminal to.
 
 ## Endpoints
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/health` | No | Returns `{"status":"ok","role":"..."}` |
+| `GET` | `/health` | No | Returns `{"status":"ok","role":"...","version":"..."}` |
 | `POST` | `/message` | `X-Intercom-Secret` header | Pushes message into Claude's session |
+
+`POST /message` body:
+
+```json
+{
+  "id": "8649f5da",
+  "replyTo": "40b0fd17",
+  "content": "3 routes, all behind requireTenant()",
+  "role": "backend-dev",
+  "timestamp": "2026-08-16T09:41:00.000Z"
+}
+```
+
+`id` and `replyTo` are optional — a message without them still delivers, it just can't be correlated.
 
 ## Use Cases
 
