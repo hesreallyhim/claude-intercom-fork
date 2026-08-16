@@ -136,6 +136,14 @@ const authorized = (token: string | null): boolean =>
 // Deliberately not an allowlist of "safe" role characters: roles are labels
 // people choose, and rejecting `backend/api` would be a regression. Only the
 // characters that break the wrapper are excluded.
+//
+// Note the limit of this. `content` cannot be constrained the same way — it
+// carries code, so angle brackets and quotes are legitimate and a closing
+// </channel> in the message body is indistinguishable from a real one at this
+// layer. Constraining the attributes is worth doing because those are labels
+// with no need for such characters, but whether the wrapper can be forged
+// through the body depends on how Claude Code escapes content when it
+// renders, which this server cannot see or control.
 
 // Excludes tag/attribute punctuation and every Unicode "Other" character:
 // C0 controls, but also zero-width and bidi-override chars used for spoofing.
