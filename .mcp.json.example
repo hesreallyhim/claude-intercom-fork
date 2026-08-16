@@ -6,7 +6,7 @@
       "env": {
         "MY_ROLE": "backend",
         "REMOTE_HOST": "OTHER_MACHINE_IP:8788",
-        "INTERCOM_SECRET": "your-shared-secret-here",
+        "INTERCOM_SECRET": "${INTERCOM_SECRET}",
         "INTERCOM_PORT": "8788"
       }
     }

@@ -85,12 +85,21 @@ const SEND_TIMEOUT_MS = parseInt(process.env.INTERCOM_SEND_TIMEOUT_MS || '10000'
 // port and nothing can be sent. The failure is reported in the conversation,
 // where whoever misconfigured it is actually looking.
 
+// `.mcp.json` supports ${VAR} expansion, and the recommended config uses it to
+// keep the secret out of a file people commit. When the variable is missing,
+// Claude Code warns and passes the ${...} text through literally rather than
+// failing — so both machines would receive the same unexpanded string, pair
+// happily, and be protected by a secret anyone can predict. Catch it.
+const UNEXPANDED_VAR = /^\$\{[^}]*\}$/
+
 const UNPAIRED_REASON =
   SECRET === ''
     ? 'INTERCOM_SECRET is not set'
-    : PLACEHOLDER_SECRETS.has(SECRET)
-      ? 'INTERCOM_SECRET is still one of the placeholder values from the docs'
-      : ''
+    : UNEXPANDED_VAR.test(SECRET)
+      ? `INTERCOM_SECRET arrived as the literal text ${SECRET}, meaning that variable was not set in the environment Claude Code was launched from`
+      : PLACEHOLDER_SECRETS.has(SECRET)
+        ? 'INTERCOM_SECRET is still one of the placeholder values from the docs'
+        : ''
 
 const PAIRING_ENABLED = UNPAIRED_REASON === ''
 
