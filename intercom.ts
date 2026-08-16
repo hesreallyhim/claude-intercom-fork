@@ -21,6 +21,7 @@
  * @requires @modelcontextprotocol/sdk
  * @see https://code.claude.com/docs/en/channels-reference
  */
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -86,6 +87,18 @@ const UNPAIRED_MESSAGE =
   `Intercom is not paired: ${UNPAIRED_REASON}. No port is being listened on and ` +
   `no message can be sent. Set a strong shared secret to the same value on both ` +
   `machines, e.g. INTERCOM_SECRET="$(openssl rand -base64 32)", then restart.`
+
+// ── Authentication ─────────────────────────────────────────────────────
+// Comparing the presented token with !== short-circuits on the first byte
+// that differs, which leaks how much of the secret a guess got right. Hashing
+// both sides first gives two fixed-length digests, so timingSafeEqual can be
+// used without the length check that would otherwise leak the secret's size.
+
+const digest = (value: string) => createHash('sha256').update(value).digest()
+const SECRET_DIGEST = digest(SECRET)
+
+const authorized = (token: string | null): boolean =>
+  token !== null && timingSafeEqual(digest(token), SECRET_DIGEST)
 
 // ── Delivery state ─────────────────────────────────────────────────────
 // A POST returning 200 only proves the remote *process* took the message. It
@@ -387,8 +400,7 @@ const handleRequest = async (req: Request): Promise<Response> => {
   // Message endpoint — receives messages from the other instance
   if (req.method === 'POST' && url.pathname === '/message') {
     // Authenticate: reject messages without the correct shared secret
-    const token = req.headers.get('X-Intercom-Secret')
-    if (token !== SECRET) {
+    if (!authorized(req.headers.get('X-Intercom-Secret'))) {
       return new Response('Unauthorized', { status: 401 })
     }
 
