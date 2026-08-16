@@ -1,0 +1,7 @@
+node_modules/
+bun.lock
+.env
+.mcp.json
+.git/
+.github/
+README.md
