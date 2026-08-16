@@ -2,3 +2,8 @@ node_modules/
 bun.lock
 .env
 .mcp.json
+
+# mcp-publisher binary, downloaded when publishing to the MCP registry
+mcp-publisher
+mcp-publisher.exe
+mcp-publisher.tar.gz
