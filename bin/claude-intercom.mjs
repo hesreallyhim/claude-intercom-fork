@@ -28,9 +28,19 @@ const child = spawn('bun', ['run', entry, ...process.argv.slice(2)], {
 // Registering these also suppresses the default "die immediately" behaviour,
 // so the shim outlives the signal and exits through the 'exit' handler below
 // once the child has actually gone.
+// Suppressing the default exit means an unresponsive child would otherwise
+// keep the shim — and whoever is waiting on it — alive indefinitely. Escalate.
+const FORCE_KILL_MS = 5000
+let forceKill = null
+
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
   process.on(signal, () => {
     if (!child.killed) child.kill(signal)
+    if (forceKill === null) {
+      forceKill = setTimeout(() => child.kill('SIGKILL'), FORCE_KILL_MS)
+      // Don't let the escalation timer itself hold the process open.
+      forceKill.unref()
+    }
   })
 }
 
@@ -47,6 +57,7 @@ child.on('error', (err) => {
 })
 
 child.on('exit', (code, signal) => {
+  if (forceKill !== null) clearTimeout(forceKill)
   if (signal) process.kill(process.pid, signal)
   else process.exit(code ?? 0)
 })
