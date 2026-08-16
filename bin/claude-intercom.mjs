@@ -19,6 +19,21 @@ const child = spawn('bun', ['run', entry, ...process.argv.slice(2)], {
   stdio: 'inherit',
 })
 
+// Claude Code stops an MCP server by signalling the process it spawned, which
+// is this shim rather than Bun. Unforwarded, the shim dies and Bun keeps
+// running: a listener still bound to the port, still holding the secret, still
+// accepting messages for a session that has gone away — and the port stays
+// taken, so the next session's intercom cannot bind it.
+//
+// Registering these also suppresses the default "die immediately" behaviour,
+// so the shim outlives the signal and exits through the 'exit' handler below
+// once the child has actually gone.
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  process.on(signal, () => {
+    if (!child.killed) child.kill(signal)
+  })
+}
+
 child.on('error', (err) => {
   if (err.code === 'ENOENT') {
     process.stderr.write(
