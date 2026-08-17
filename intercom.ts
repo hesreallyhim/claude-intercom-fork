@@ -50,6 +50,9 @@ const MY_ROLE = process.env.MY_ROLE || 'developer-a'
 /** Port to listen on for incoming messages */
 const PORT = parseInt(process.env.INTERCOM_PORT || '8788', 10)
 
+/** Interface to bind the listener to. Use 127.0.0.1 when a tunnel fronts it */
+const HOST = process.env.INTERCOM_HOST || '0.0.0.0'
+
 /** How long an outbound POST may hang before we give up on it */
 const SEND_TIMEOUT_MS = parseInt(process.env.INTERCOM_SEND_TIMEOUT_MS || '10000', 10)
 
@@ -426,7 +429,7 @@ if (PAIRING_ENABLED) {
     maxRequestBodySize: MAX_BODY_BYTES,
     fetch: handleRequest,
   })
-  console.error(`[intercom] ${MY_ROLE} listening on port ${PORT}`)
+  console.error(`[intercom] ${MY_ROLE} listening on ${HOST}:${PORT}`)
   console.error(`[intercom] Remote: ${REMOTE_HOST}`)
 } else {
   console.error(`[intercom] ${UNPAIRED_MESSAGE}`)
