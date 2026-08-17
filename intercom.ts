@@ -68,12 +68,18 @@ const SEND_TIMEOUT_MS = parseInt(process.env.INTERCOM_SEND_TIMEOUT_MS || '10000'
 // live session, so it has no default. Without a real one the intercom runs
 // unpaired: tools stay listed, but no port is bound and nothing can be sent.
 
+// Claude Code passes a missing ${VAR} through as literal text rather than
+// failing, which would pair both machines on the same guessable string.
+const UNEXPANDED_VAR = /^\$\{[^}]*\}$/
+
 const UNPAIRED_REASON =
   SECRET === ''
     ? 'INTERCOM_SECRET is not set'
-    : PLACEHOLDER_SECRETS.has(SECRET)
-      ? 'INTERCOM_SECRET is still one of the placeholder values from the docs'
-      : ''
+    : UNEXPANDED_VAR.test(SECRET)
+      ? `INTERCOM_SECRET arrived as the literal text ${SECRET}, meaning that variable was not set in the environment Claude Code was launched from`
+      : PLACEHOLDER_SECRETS.has(SECRET)
+        ? 'INTERCOM_SECRET is still one of the placeholder values from the docs'
+        : ''
 
 const PAIRING_ENABLED = UNPAIRED_REASON === ''
 

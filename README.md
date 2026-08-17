@@ -100,11 +100,19 @@ Then use `"command": "bun"` with `"args": ["/path/to/claude-intercom/intercom.ts
 
 Copy the example config into your project's `.mcp.json`.
 
-First generate a secret and use the **same value on both machines** — the placeholders below are rejected at startup, so a config you forgot to fill in fails loudly instead of listening with a password that is published in this README:
+First generate a secret, and use the **same value on both machines**:
 
 ```bash
 openssl rand -base64 32
 ```
+
+Then export it in the shell you launch Claude Code from, rather than typing it into the config:
+
+```bash
+export INTERCOM_SECRET='the-value-you-just-generated'
+```
+
+`.mcp.json` is a project file, and project files get committed. [Claude Code expands `${VAR}` in `.mcp.json`](https://code.claude.com/docs/en/mcp#environment-variable-expansion-in-mcp-json) — in `command`, `args`, `env`, `url` and `headers` — so the config below can be checked in and shared with your teammate while the secret itself never leaves your environment.
 
 **Machine A** (e.g. backend — static IP or VPS):
 
@@ -117,7 +125,7 @@ openssl rand -base64 32
       "env": {
         "MY_ROLE": "backend",
         "REMOTE_HOST": "MACHINE_B_IP:8788",
-        "INTERCOM_SECRET": "your-shared-secret",
+        "INTERCOM_SECRET": "${INTERCOM_SECRET}",
         "INTERCOM_PORT": "8788"
       }
     }
@@ -136,7 +144,7 @@ openssl rand -base64 32
       "env": {
         "MY_ROLE": "frontend",
         "REMOTE_HOST": "MACHINE_A_IP:8788",
-        "INTERCOM_SECRET": "your-shared-secret",
+        "INTERCOM_SECRET": "${INTERCOM_SECRET}",
         "INTERCOM_PORT": "8788"
       }
     }
@@ -224,7 +232,7 @@ Every message sits in one of three states:
 |---------------------|----------|---------|-------------|
 | `MY_ROLE` | Yes | `developer-a` | Label for this instance (appears in message tags) |
 | `REMOTE_HOST` | Yes | `localhost:8789` | Address of the other machine (`host:port` or tunnel URL). Include `https://` for any TLS tunnel that isn't ngrok |
-| `INTERCOM_SECRET` | Yes | *none* | Shared secret — must match on both sides. There is no default: if it is unset or left as a docs placeholder, the server refuses to start |
+| `INTERCOM_SECRET` | Yes | *none* | Shared secret — must match on both sides. There is no default: unset, left as a docs placeholder, or an unexpanded `${VAR}`, and the intercom refuses to pair |
 | `INTERCOM_PORT` | No | `8788` | Port to listen on for incoming messages |
 | `INTERCOM_HOST` | No | `0.0.0.0` | Interface to bind the listener to. Use `127.0.0.1` when a tunnel fronts it |
 | `INTERCOM_SEND_TIMEOUT_MS` | No | `10000` | How long an outbound POST may hang before giving up |
@@ -244,7 +252,7 @@ The stdio leg is not an implementation detail you can swap for HTTP. It is what 
 ## Security
 
 - **Shared secret authentication**: Every message requires an `X-Intercom-Secret` header matching the configured secret. Requests without it get a `401 Unauthorized`.
-- **No default secret**: `INTERCOM_SECRET` has no fallback value. Unset it, or leave a docs placeholder in place, and the process exits instead of starting a listener anyone could talk to.
+- **No default secret**: `INTERCOM_SECRET` has no fallback value. Leave it unset, leave a docs placeholder in place, or reference a `${VAR}` you never exported, and the intercom starts *unpaired* — it binds no port and `send_message` refuses, explaining why. The unexpanded-`${VAR}` case matters because Claude Code passes a missing variable through as literal text, which would otherwise give both machines the same guessable secret.
 - **Inbound is treated as data, not instructions**: the server tells the receiving Claude that a channel message comes from another person's session — it can't approve anything, can't change configuration, a slash command in the text is inert, and requests for credentials or env files should be refused and surfaced to you.
 - **No data persistence**: Messages are forwarded in real-time and not stored.
 - **Configurable bind address**: By default listens on `0.0.0.0` for cross-machine access. Set `INTERCOM_HOST=127.0.0.1` when a tunnel is doing the reaching, so only the tunnel can connect.
