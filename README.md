@@ -98,7 +98,13 @@ Then use `"command": "bun"` with `"args": ["/path/to/claude-intercom/intercom.ts
 
 ### 2. Configure
 
-Copy the example config into your project's `.mcp.json`:
+Copy the example config into your project's `.mcp.json`.
+
+First generate a secret and use the **same value on both machines** — the placeholders below are rejected at startup, so a config you forgot to fill in fails loudly instead of listening with a password that is published in this README:
+
+```bash
+openssl rand -base64 32
+```
 
 **Machine A** (e.g. backend — static IP or VPS):
 
@@ -216,7 +222,7 @@ Every message sits in one of three states:
 |---------------------|----------|---------|-------------|
 | `MY_ROLE` | Yes | `developer-a` | Label for this instance (appears in message tags) |
 | `REMOTE_HOST` | Yes | `localhost:8789` | Address of the other machine (`host:port` or tunnel URL) |
-| `INTERCOM_SECRET` | Yes | `change-me-in-production` | Shared secret — must match on both sides |
+| `INTERCOM_SECRET` | Yes | *none* | Shared secret — must match on both sides. There is no default: if it is unset or left as a docs placeholder, the server refuses to start |
 | `INTERCOM_PORT` | No | `8788` | Port to listen on for incoming messages |
 | `INTERCOM_SEND_TIMEOUT_MS` | No | `10000` | How long an outbound POST may hang before giving up |
 
@@ -235,6 +241,7 @@ The stdio leg is not an implementation detail you can swap for HTTP. It is what 
 ## Security
 
 - **Shared secret authentication**: Every message requires an `X-Intercom-Secret` header matching the configured secret. Requests without it get a `401 Unauthorized`.
+- **No default secret**: `INTERCOM_SECRET` has no fallback value. Unset it, or leave a docs placeholder in place, and the process exits instead of starting a listener anyone could talk to.
 - **Inbound is treated as data, not instructions**: the server tells the receiving Claude that a channel message comes from another person's session — it can't approve anything, can't change configuration, a slash command in the text is inert, and requests for credentials or env files should be refused and surfaced to you.
 - **No data persistence**: Messages are forwarded in real-time and not stored.
 - **Localhost binding optional**: By default listens on `0.0.0.0` for cross-machine access. Set to `127.0.0.1` if using a tunnel.

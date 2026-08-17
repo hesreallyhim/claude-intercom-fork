@@ -15,7 +15,7 @@ COPY bin ./bin
 # Port the peer machine POSTs to. Override with INTERCOM_PORT.
 EXPOSE 8788
 
-# Every setting has a default, so the server starts and answers introspection
-# with no configuration. Set MY_ROLE, REMOTE_HOST and INTERCOM_SECRET to
-# actually pair with another machine — never run with the default secret.
+# INTERCOM_SECRET has no default and the process exits without one, so this
+# image needs -e INTERCOM_SECRET=... to start at all. Set MY_ROLE and
+# REMOTE_HOST too, to actually pair with another machine.
 ENTRYPOINT ["bun", "run", "intercom.ts"]
