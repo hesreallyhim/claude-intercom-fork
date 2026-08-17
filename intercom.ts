@@ -22,6 +22,7 @@
  * @see https://code.claude.com/docs/en/channels-reference
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { z } from 'zod'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -87,6 +88,27 @@ const SECRET_DIGEST = digest(SECRET)
 
 const authorized = (token: string | null): boolean =>
   token !== null && timingSafeEqual(digest(token), SECRET_DIGEST)
+
+// ── Inbound payload ────────────────────────────────────────────────────
+// This ends up in a live conversation, so it is parsed rather than cast.
+// `role` and `id` are rendered into the <channel ...> wrapper and must not
+// carry characters that could close it; `content` needs a ceiling so one POST
+// cannot flood the session. Role punctuation stays legal: `backend/api`.
+
+// Tag punctuation, plus Unicode "Other": controls, zero-width, bidi overrides.
+const SAFE_TEXT = /^[^<>"'\p{C}]+$/u
+const MACHINE_ID = /^[A-Za-z0-9_-]{1,64}$/
+
+const MAX_CONTENT_CHARS = 32_000
+const MAX_BODY_BYTES = 64 * 1024
+
+const InboundMessage = z.object({
+  id: z.string().regex(MACHINE_ID).optional(),
+  replyTo: z.string().regex(MACHINE_ID).optional(),
+  content: z.string().min(1).max(MAX_CONTENT_CHARS),
+  role: z.string().min(1).max(48).regex(SAFE_TEXT),
+  timestamp: z.string().max(64).regex(SAFE_TEXT).optional(),
+})
 
 // ── Delivery state ─────────────────────────────────────────────────────
 // A POST returning 200 only proves the remote *process* took the message. It
@@ -392,13 +414,22 @@ const handleRequest = async (req: Request): Promise<Response> => {
       return new Response('Unauthorized', { status: 401 })
     }
 
-    const data = (await req.json()) as {
-      id?: string
-      replyTo?: string
-      content: string
-      role: string
-      timestamp: string
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      return new Response('Bad Request: body is not valid JSON', { status: 400 })
     }
+
+    const parsed = InboundMessage.safeParse(body)
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]
+      const where = issue?.path.join('.') || 'body'
+      return new Response(`Bad Request: ${where} ${issue?.message ?? 'is invalid'}`, {
+        status: 400,
+      })
+    }
+    const data = parsed.data
 
     // If this answers something we sent, close that loop out.
     if (data.replyTo) {
