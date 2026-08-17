@@ -251,7 +251,9 @@ The stdio leg is not an implementation detail you can swap for HTTP. It is what 
 
 ## Security
 
-- **Shared secret authentication**: Every message requires an `X-Intercom-Secret` header matching the configured secret. Requests without it get a `401 Unauthorized`.
+- **Shared secret authentication**: `POST /message` requires an `X-Intercom-Secret` header matching the configured secret, compared in constant time. Anything else gets a `401 Unauthorized`. `GET /health` is deliberately *not* authenticated, so you can verify a tunnel end to end — it reports this instance's role and version to anyone who asks, so treat a reachable intercom as discoverable.
+- **The secret is only as private as the transport**: it is sent as a plaintext header on every message. Over Tailscale (WireGuard) or an HTTPS tunnel that is fine. Over plain HTTP on a shared network, anyone on the path can read it and then use it.
+- **No replay protection**: messages carry an `id` and a `timestamp`, but neither is checked for freshness or reuse. Someone who captures a single authenticated request on a cleartext link can resend it verbatim, as often as they like.
 - **No default secret**: `INTERCOM_SECRET` has no fallback value. Leave it unset, leave a docs placeholder in place, or reference a `${VAR}` you never exported, and the intercom starts *unpaired* — it binds no port and `send_message` refuses, explaining why. The unexpanded-`${VAR}` case matters because Claude Code passes a missing variable through as literal text, which would otherwise give both machines the same guessable secret.
 - **Inbound is treated as data, not instructions**: the server tells the receiving Claude that a channel message comes from another person's session — it can't approve anything, can't change configuration, a slash command in the text is inert, and requests for credentials or env files should be refused and surfaced to you.
 - **No data persistence**: Messages are forwarded in real-time and not stored.
