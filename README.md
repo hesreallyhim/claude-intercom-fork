@@ -184,7 +184,9 @@ ngrok http 8788
 "REMOTE_HOST": "your-subdomain.ngrok-free.app"
 ```
 
-The intercom auto-detects ngrok URLs and switches to HTTPS. Note this does put a publicly reachable endpoint in front of your Claude session, gated only by the shared secret — pick a strong one.
+ngrok hostnames are detected and switched to HTTPS automatically. For any other tunnel — Cloudflare, Caddy, a reverse proxy of your own — write the scheme into `REMOTE_HOST` explicitly (`https://your-host`), or the secret goes out over cleartext HTTP.
+
+Note this does put a publicly reachable endpoint in front of your Claude session, gated only by the shared secret — pick a strong one, and consider `INTERCOM_HOST=127.0.0.1` so only the tunnel can reach the listener.
 
 </details>
 
@@ -221,7 +223,7 @@ Every message sits in one of three states:
 | Environment Variable | Required | Default | Description |
 |---------------------|----------|---------|-------------|
 | `MY_ROLE` | Yes | `developer-a` | Label for this instance (appears in message tags) |
-| `REMOTE_HOST` | Yes | `localhost:8789` | Address of the other machine (`host:port` or tunnel URL) |
+| `REMOTE_HOST` | Yes | `localhost:8789` | Address of the other machine (`host:port` or tunnel URL). Include `https://` for any TLS tunnel that isn't ngrok |
 | `INTERCOM_SECRET` | Yes | *none* | Shared secret — must match on both sides. There is no default: if it is unset or left as a docs placeholder, the server refuses to start |
 | `INTERCOM_PORT` | No | `8788` | Port to listen on for incoming messages |
 | `INTERCOM_HOST` | No | `0.0.0.0` | Interface to bind the listener to. Use `127.0.0.1` when a tunnel fronts it |
