@@ -7,45 +7,18 @@ Let two Claude Code instances on different machines talk to each other in real-t
 <img width="1200" height="675" alt="intercom-demo" src="https://github.com/user-attachments/assets/15e4b671-3f66-4712-bf9b-482ba5f3d293" />
 
 
-## Read this first: Claude Code has native cross-session messaging now
+## What Intercom does that native can't
 
-On 7 August 2026, Claude Code v2.1.224 shipped [cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging) — `ListAgents` and `SendMessage`, built in, nothing to install.
+Claude Code has [native cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging) now. Here's where Intercom is still the answer:
 
-**If you are on macOS or Linux and you want your own sessions to talk to each other, use the native feature.** It is better than this project in every way that matters: no setup, no shared secret, no open port, permission-aware delivery, and same-machine messages never leave your machine. This README is not going to pretend otherwise.
+- **Two different people.** This is the big one. Native connects *your* sessions — the inbox is tied to your own OS user and cross-machine delivery rides your own Remote Control. A backend dev on their laptop and a frontend dev on theirs are two accounts, and native can't join them. That two-person hotline is exactly what Intercom was built for.
+- **Native Windows.** Native messaging is macOS and Linux only. Intercom is Bun over HTTP and doesn't care what OS you run.
+- **Your network, not Anthropic's.** Native cross-machine messages relay through Anthropic servers. Intercom POSTs straight over your own network, VPN or tunnel.
+- **Any provider.** Works on Bedrock, Vertex and Foundry, and in telemetry-disabled environments, where native messaging is switched off.
+- **Container to host.** Native discovery works through files on disk, so a session in a container and one on the host can't see each other. Intercom just needs a reachable port.
+- **Honest delivery.** `send_message` reports `sent`, `delivered-to-process` and `answered` as three separate states, plus a `check_message` tool. You find out when the other side never picked it up, instead of planning around an answer that was never coming.
 
-Intercom was built in March 2026, five months before that landed. What follows is an honest account of what each one covers.
-
-### What native messaging covers
-
-| | |
-|---|---|
-| Your own sessions, same machine | Yes — over a per-session socket, never through Anthropic servers |
-| Your own sessions, your other machines | Yes — requires [Remote Control](https://code.claude.com/docs/en/remote-control) on both ends; messages travel through Anthropic servers. Starting a conversation needs v2.1.225+ |
-| Your Claude Code on the web sessions | Yes — through Anthropic servers |
-| Subagents and agent teams | Yes — same `SendMessage` tool |
-
-### What native messaging does not cover
-
-These are the cases where Intercom is still the answer:
-
-1. **Native Windows.** Cross-session messaging is macOS and Linux only, including Linux inside WSL 2. Anthropic states plainly that it is not offered on native Windows. Intercom is Bun over HTTP and does not care what OS you run.
-2. **Two different people.** This is the big one, and it is architectural rather than a gap waiting to be filled. Native messaging connects *your* sessions — the inbox socket is restricted to your own OS user, and cross-machine delivery rides *your* Remote Control connection. A backend dev on their laptop and a frontend dev on theirs are two accounts, and native messaging does not join them. That two-person hotline is the use case Intercom was written for.
-3. **Cross-machine without an Anthropic round trip.** Native cross-machine messages relay through Anthropic servers. Intercom POSTs directly over your own network, VPN, or tunnel.
-4. **Non-Anthropic providers.** Native messaging is unavailable on Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform, and Microsoft Foundry.
-5. **Telemetry-disabled environments.** The feature depends on feature-flag evaluation, so `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, `DO_NOT_TRACK`, or `DISABLE_GROWTHBOOK` turn it off.
-6. **Container to host.** Same-machine discovery works through files on disk, so a session inside a container and one on the host cannot see each other. Intercom just needs a reachable port.
-
-### Which should you use
-
-```
-Your own sessions, macOS/Linux        ->  native cross-session messaging
-Two different developers              ->  Intercom
-Native Windows                        ->  Intercom
-Bedrock / Vertex / Foundry            ->  Intercom
-Must not transit Anthropic servers    ->  Intercom
-```
-
-One more difference worth knowing: native messaging is plain text between Claudes and applies the receiving session's own permission rules and inbound controls. Intercom is a raw pipe with a shared secret — anyone holding your secret and address can push text straight into your session. Read [Security](#security) before you expose a port.
+If you're on macOS or Linux and you just want your own sessions talking to each other, native is simpler — use that. Everything else above is what this is for.
 
 ## Why?
 
@@ -74,6 +47,61 @@ Both instances run the same `intercom.ts` file. Each listens for HTTP messages a
 - [Claude Code](https://claude.ai/claude-code) v2.1.80 or later
 - [Bun](https://bun.sh) runtime
 - Both machines must be able to reach each other over HTTP. [Tailscale](https://tailscale.com) is the recommended way — see [Connecting the two machines](#connecting-the-two-machines)
+
+## Set it up with Claude
+
+Paste this into a Claude Code session on each machine and it will walk you
+through the whole thing. Run it on machine A first, keep the secret it gives
+you, then run it on machine B.
+
+````text
+Set up claude-intercom on this machine so this Claude Code session can message
+a Claude Code session on my other machine.
+
+Work through this in order, and stop and ask me whenever you need something
+only I can tell you.
+
+1. Check prerequisites. Confirm `bun --version` works and that `claude --version`
+   is 2.1.80 or newer. If Bun is missing, tell me how to install it for my OS
+   and stop there.
+
+2. Work out how the two machines will reach each other. Run `tailscale ip -4`.
+   If that returns an address we'll use Tailscale. If Tailscale isn't installed,
+   tell me it's the recommended option and ask whether I want to install it or
+   use something else.
+
+3. Ask me these, one at a time:
+   - a short role name for THIS machine, e.g. "frontend", "vps", "laptop"
+   - the address of the OTHER machine (hostname or IP)
+   - whether this is the first machine I'm setting up or the second
+
+4. Handle the shared secret.
+   - First machine: generate a strong random secret, show it to me once, and
+     tell me I'll need it when I run this on the other machine.
+   - Second machine: ask me to paste the secret from the first one.
+   Both machines must end up with exactly the same secret.
+
+5. Write `.mcp.json` in this project with an "intercom" server: command `npx`,
+   args `["-y", "claude-intercom"]`, and env `MY_ROLE`, `REMOTE_HOST` (the other
+   machine plus `:8788`), `INTERCOM_SECRET`, `INTERCOM_PORT` set to 8788.
+   If `.mcp.json` already exists, merge the intercom entry into it instead of
+   overwriting the file. Make sure `.mcp.json` is gitignored, it holds the secret.
+
+6. Tell me to restart Claude Code on this machine with:
+   `claude --dangerously-load-development-channels server:intercom`
+   and explain that the flag is needed because the channels capability is still
+   experimental, and that messages only arrive while both sides are running.
+
+7. Once both machines are up, tell me to test it by asking one session to send
+   a message to the other. Remind me that `send_message` reports sent /
+   delivered-to-process / answered separately, so "delivered" means the remote
+   process accepted it, not that the other Claude has read it.
+
+Don't invent configuration keys. The only environment variables are MY_ROLE,
+REMOTE_HOST, INTERCOM_SECRET, INTERCOM_PORT and INTERCOM_SEND_TIMEOUT_MS.
+````
+
+Prefer to do it by hand? The manual steps are below.
 
 ## Quick Start
 
