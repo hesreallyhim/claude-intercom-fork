@@ -301,9 +301,9 @@ The stdio leg is not an implementation detail you can swap for HTTP. It is what 
 
 <a href="https://www.star-history.com/?repos=MuhammadTalhaMT%2Fclaude-intercom&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=MuhammadTalhaMT/claude-intercom&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=MuhammadTalhaMT/claude-intercom&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=MuhammadTalhaMT/claude-intercom&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=MuhammadTalhaMT/claude-intercom&type=date&theme=dark&legend=top-left&sealed_token=Ud1kanPppbKNYxVWeWhXNaje8aO3qowksrsjC_x6Sn4DVP0vraT_UzrNbPv42LNKmb0eXgr3Pfr0dGcHQ_5lOaTHorFij5eh6OOHQgzUqipwB820zlkP9OinKDs7wQ8cq3XHmSn-UHENiXFeBK_PG5wA88RHmopqKlySA4Bd4BPhD4_daeYqAcKXvh-I" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=MuhammadTalhaMT/claude-intercom&type=date&legend=top-left&sealed_token=Ud1kanPppbKNYxVWeWhXNaje8aO3qowksrsjC_x6Sn4DVP0vraT_UzrNbPv42LNKmb0eXgr3Pfr0dGcHQ_5lOaTHorFij5eh6OOHQgzUqipwB820zlkP9OinKDs7wQ8cq3XHmSn-UHENiXFeBK_PG5wA88RHmopqKlySA4Bd4BPhD4_daeYqAcKXvh-I" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=MuhammadTalhaMT/claude-intercom&type=date&legend=top-left&sealed_token=Ud1kanPppbKNYxVWeWhXNaje8aO3qowksrsjC_x6Sn4DVP0vraT_UzrNbPv42LNKmb0eXgr3Pfr0dGcHQ_5lOaTHorFij5eh6OOHQgzUqipwB820zlkP9OinKDs7wQ8cq3XHmSn-UHENiXFeBK_PG5wA88RHmopqKlySA4Bd4BPhD4_daeYqAcKXvh-I" />
  </picture>
 </a>
 
