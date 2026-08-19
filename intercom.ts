@@ -21,6 +21,8 @@
  * @requires @modelcontextprotocol/sdk
  * @see https://code.claude.com/docs/en/channels-reference
  */
+import { createHash, timingSafeEqual } from 'node:crypto'
+import { z } from 'zod'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -31,11 +33,23 @@ import {
 // ── Configuration ──────────────────────────────────────────────────────
 // All config via environment variables — no hardcoded values.
 
+/** Placeholders that ship in the docs. Never valid runtime secrets. */
+const PLACEHOLDER_SECRETS = new Set([
+  'change-me-in-production',
+  'your-shared-secret',
+  'your-shared-secret-here',
+])
+
 /** Shared secret for authenticating messages between instances */
-const SECRET = process.env.INTERCOM_SECRET || 'change-me-in-production'
+const SECRET = process.env.INTERCOM_SECRET ?? ''
 
 /** The remote machine's address (IP:port, hostname:port, or tunnel URL) */
 const REMOTE_HOST = process.env.REMOTE_HOST || 'localhost:8789'
+
+/** A scheme in REMOTE_HOST is used as written; bare hosts get http, ngrok https */
+const REMOTE_BASE = /^https?:\/\//i.test(REMOTE_HOST)
+  ? REMOTE_HOST.replace(/\/+$/, '')
+  : `${REMOTE_HOST.includes('ngrok') ? 'https' : 'http'}://${REMOTE_HOST}`
 
 /** This instance's role — appears in message tags so Claude knows who's talking */
 const MY_ROLE = process.env.MY_ROLE || 'developer-a'
@@ -43,8 +57,69 @@ const MY_ROLE = process.env.MY_ROLE || 'developer-a'
 /** Port to listen on for incoming messages */
 const PORT = parseInt(process.env.INTERCOM_PORT || '8788', 10)
 
+/** Interface to bind the listener to. Use 127.0.0.1 when a tunnel fronts it */
+const HOST = process.env.INTERCOM_HOST || '0.0.0.0'
+
 /** How long an outbound POST may hang before we give up on it */
 const SEND_TIMEOUT_MS = parseInt(process.env.INTERCOM_SEND_TIMEOUT_MS || '10000', 10)
+
+// ── Fail closed ────────────────────────────────────────────────────────
+// The secret is the only thing between a stranger and a write channel into a
+// live session, so it has no default. Without a real one the intercom runs
+// unpaired: tools stay listed, but no port is bound and nothing can be sent.
+
+// Claude Code passes a missing ${VAR} through as literal text rather than
+// failing, which would pair both machines on the same guessable string.
+const UNEXPANDED_VAR = /^\$\{[^}]*\}$/
+
+const UNPAIRED_REASON =
+  SECRET === ''
+    ? 'INTERCOM_SECRET is not set'
+    : UNEXPANDED_VAR.test(SECRET)
+      ? `INTERCOM_SECRET arrived as the literal text ${SECRET}, meaning that variable was not set in the environment Claude Code was launched from`
+      : PLACEHOLDER_SECRETS.has(SECRET)
+        ? 'INTERCOM_SECRET is still one of the placeholder values from the docs'
+        : ''
+
+const PAIRING_ENABLED = UNPAIRED_REASON === ''
+
+/** Reported through the tool, where whoever misconfigured it will see it. */
+const UNPAIRED_MESSAGE =
+  `Intercom is not paired: ${UNPAIRED_REASON}. No port is being listened on and ` +
+  `no message can be sent. Set a strong shared secret to the same value on both ` +
+  `machines, e.g. INTERCOM_SECRET="$(openssl rand -base64 32)", then restart.`
+
+// ── Authentication ─────────────────────────────────────────────────────
+// !== short-circuits on the first differing byte, leaking through timing how
+// much of the secret a guess got right. Hashing gives fixed-length digests,
+// so timingSafeEqual needs no length check — which would leak its size.
+
+const digest = (value: string) => createHash('sha256').update(value).digest()
+const SECRET_DIGEST = digest(SECRET)
+
+const authorized = (token: string | null): boolean =>
+  token !== null && timingSafeEqual(digest(token), SECRET_DIGEST)
+
+// ── Inbound payload ────────────────────────────────────────────────────
+// This ends up in a live conversation, so it is parsed rather than cast.
+// `role` and `id` are rendered into the <channel ...> wrapper and must not
+// carry characters that could close it; `content` needs a ceiling so one POST
+// cannot flood the session. Role punctuation stays legal: `backend/api`.
+
+// Tag punctuation, plus Unicode "Other": controls, zero-width, bidi overrides.
+const SAFE_TEXT = /^[^<>"'\p{C}]+$/u
+const MACHINE_ID = /^[A-Za-z0-9_-]{1,64}$/
+
+const MAX_CONTENT_CHARS = 32_000
+const MAX_BODY_BYTES = 64 * 1024
+
+const InboundMessage = z.object({
+  id: z.string().regex(MACHINE_ID).optional(),
+  replyTo: z.string().regex(MACHINE_ID).optional(),
+  content: z.string().min(1).max(MAX_CONTENT_CHARS),
+  role: z.string().min(1).max(48).regex(SAFE_TEXT),
+  timestamp: z.string().max(64).regex(SAFE_TEXT).optional(),
+})
 
 // ── Delivery state ─────────────────────────────────────────────────────
 // A POST returning 200 only proves the remote *process* took the message. It
@@ -208,6 +283,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       expectReplyWithin?: string
     }
 
+    if (!PAIRING_ENABLED) {
+      return {
+        content: [{ type: 'text' as const, text: UNPAIRED_MESSAGE }],
+        isError: true,
+      }
+    }
+
     const id = crypto.randomUUID().slice(0, 8)
     const budgetMs = parseBudget(expectReplyWithin)
     const entry: Tracked = {
@@ -220,11 +302,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     remember(entry)
 
     try {
-      // Auto-detect protocol: tunnel URLs need HTTPS, direct IPs use HTTP
-      const protocol =
-        REMOTE_HOST.includes('ngrok') || REMOTE_HOST.includes('https') ? 'https' : 'http'
-
-      const resp = await fetch(`${protocol}://${REMOTE_HOST}/message`, {
+      const resp = await fetch(`${REMOTE_BASE}/message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -326,66 +404,83 @@ await mcp.connect(new StdioServerTransport())
 // Receives messages from the remote machine and pushes them into the
 // local Claude Code session as channel notifications.
 
-Bun.serve({
-  port: PORT,
-  hostname: '0.0.0.0',
-  async fetch(req) {
-    const url = new URL(req.url)
+const handleRequest = async (req: Request): Promise<Response> => {
+  const url = new URL(req.url)
 
-    // Health check — useful for verifying the tunnel/connection
-    if (req.method === 'GET' && url.pathname === '/health') {
-      return new Response(
-        JSON.stringify({ status: 'ok', role: MY_ROLE, version: '2.0.0' }),
-        { headers: { 'Content-Type': 'application/json' } },
-      )
+  // Health check — useful for verifying the tunnel/connection
+  if (req.method === 'GET' && url.pathname === '/health') {
+    return new Response(JSON.stringify({ status: 'ok', role: MY_ROLE, version: '2.0.0' }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  // Message endpoint — receives messages from the other instance
+  if (req.method === 'POST' && url.pathname === '/message') {
+    // Authenticate: reject messages without the correct shared secret
+    if (!authorized(req.headers.get('X-Intercom-Secret'))) {
+      return new Response('Unauthorized', { status: 401 })
     }
 
-    // Message endpoint — receives messages from the other instance
-    if (req.method === 'POST' && url.pathname === '/message') {
-      // Authenticate: reject messages without the correct shared secret
-      const token = req.headers.get('X-Intercom-Secret')
-      if (token !== SECRET) {
-        return new Response('Unauthorized', { status: 401 })
-      }
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      return new Response('Bad Request: body is not valid JSON', { status: 400 })
+    }
 
-      const data = (await req.json()) as {
-        id?: string
-        replyTo?: string
-        content: string
-        role: string
-        timestamp: string
-      }
-
-      // If this answers something we sent, close that loop out.
-      if (data.replyTo) {
-        const original = outbound.get(data.replyTo)
-        if (original) {
-          original.status = 'answered'
-          original.answeredAt = Date.now()
-        }
-      }
-
-      // Push the message into Claude's conversation as a channel event.
-      // The id travels with it so Claude can set replyTo when it answers.
-      await mcp.notification({
-        method: 'notifications/claude/channel',
-        params: {
-          content: data.content,
-          meta: {
-            id: data.id,
-            replyTo: data.replyTo,
-            role: data.role,
-            timestamp: data.timestamp,
-          },
-        },
+    const parsed = InboundMessage.safeParse(body)
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]
+      const where = issue?.path.join('.') || 'body'
+      return new Response(`Bad Request: ${where} ${issue?.message ?? 'is invalid'}`, {
+        status: 400,
       })
+    }
+    const data = parsed.data
 
-      return new Response('ok')
+    // If this answers something we sent, close that loop out.
+    if (data.replyTo) {
+      const original = outbound.get(data.replyTo)
+      if (original) {
+        original.status = 'answered'
+        original.answeredAt = Date.now()
+      }
     }
 
-    return new Response('Not Found', { status: 404 })
-  },
-})
+    // Push the message into Claude's conversation as a channel event.
+    // The id travels with it so Claude can set replyTo when it answers.
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: data.content,
+        meta: {
+          id: data.id,
+          replyTo: data.replyTo,
+          role: data.role,
+          timestamp: data.timestamp,
+        },
+      },
+    })
 
-console.error(`[intercom] ${MY_ROLE} listening on port ${PORT}`)
-console.error(`[intercom] Remote: ${REMOTE_HOST}`)
+    return new Response('ok')
+  }
+
+  return new Response('Not Found', { status: 404 })
+}
+
+// Unpaired binds nothing; the tools stay listed and report why they are inert.
+if (PAIRING_ENABLED) {
+  // A chunked request carries no length for the handler to check, so the
+  // ceiling is enforced here, as the body arrives.
+  Bun.serve({
+    port: PORT,
+    hostname: HOST,
+    maxRequestBodySize: MAX_BODY_BYTES,
+    fetch: handleRequest,
+  })
+  console.error(`[intercom] ${MY_ROLE} listening on ${HOST}:${PORT}`)
+  console.error(`[intercom] Remote: ${REMOTE_BASE}`)
+} else {
+  console.error(`[intercom] ${UNPAIRED_MESSAGE}`)
+  console.error('[intercom] Running MCP-only: no port bound, tools inert.')
+}

@@ -32,10 +32,11 @@
         },
         {
           "name": "INTERCOM_SECRET",
-          "description": "Shared secret authenticating messages between the two instances. Must match on both sides.",
+          "description": "Shared secret authenticating messages between the two instances. Must match on both sides. There is no default: without it the intercom starts unpaired, binds no port, and refuses to send.",
           "isRequired": true,
           "isSecret": true,
-          "format": "string"
+          "format": "string",
+          "placeholder": "output of: openssl rand -base64 32"
         },
         {
           "name": "INTERCOM_PORT",
@@ -43,6 +44,13 @@
           "isRequired": false,
           "isSecret": false,
           "format": "number"
+        },
+        {
+          "name": "INTERCOM_HOST",
+          "description": "Interface to bind the listener to. Defaults to 0.0.0.0. Set 127.0.0.1 when a tunnel fronts the intercom, so only the tunnel can connect.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
         },
         {
           "name": "INTERCOM_SEND_TIMEOUT_MS",

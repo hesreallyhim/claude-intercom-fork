@@ -19,6 +19,21 @@ const child = spawn('bun', ['run', entry, ...process.argv.slice(2)], {
   stdio: 'inherit',
 })
 
+// Claude Code signals this shim, not Bun. Unforwarded, the listener outlives
+// the session: still bound to the port, still holding the secret.
+const FORCE_KILL_MS = 5000
+let forceKill = null
+
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  process.on(signal, () => {
+    if (!child.killed) child.kill(signal)
+    if (forceKill === null) {
+      forceKill = setTimeout(() => child.kill('SIGKILL'), FORCE_KILL_MS)
+      forceKill.unref()
+    }
+  })
+}
+
 child.on('error', (err) => {
   if (err.code === 'ENOENT') {
     process.stderr.write(
@@ -32,6 +47,11 @@ child.on('error', (err) => {
 })
 
 child.on('exit', (code, signal) => {
-  if (signal) process.kill(process.pid, signal)
-  else process.exit(code ?? 0)
+  if (forceKill !== null) clearTimeout(forceKill)
+  if (signal) {
+    process.removeAllListeners(signal)
+    process.kill(process.pid, signal)
+  } else {
+    process.exit(code ?? 0)
+  }
 })

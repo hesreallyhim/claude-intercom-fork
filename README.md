@@ -126,7 +126,21 @@ Then use `"command": "bun"` with `"args": ["/path/to/claude-intercom/intercom.ts
 
 ### 2. Configure
 
-Copy the example config into your project's `.mcp.json`:
+Copy the example config into your project's `.mcp.json`.
+
+First generate a secret, and use the **same value on both machines**:
+
+```bash
+openssl rand -base64 32
+```
+
+Then export it in the shell you launch Claude Code from, rather than typing it into the config:
+
+```bash
+export INTERCOM_SECRET='the-value-you-just-generated'
+```
+
+`.mcp.json` is a project file, and project files get committed. [Claude Code expands `${VAR}` in `.mcp.json`](https://code.claude.com/docs/en/mcp#environment-variable-expansion-in-mcp-json) — in `command`, `args`, `env`, `url` and `headers` — so the config below can be checked in and shared with your teammate while the secret itself never leaves your environment.
 
 **Machine A** (e.g. backend — static IP or VPS):
 
@@ -139,7 +153,7 @@ Copy the example config into your project's `.mcp.json`:
       "env": {
         "MY_ROLE": "backend",
         "REMOTE_HOST": "MACHINE_B_IP:8788",
-        "INTERCOM_SECRET": "your-shared-secret",
+        "INTERCOM_SECRET": "${INTERCOM_SECRET}",
         "INTERCOM_PORT": "8788"
       }
     }
@@ -158,7 +172,7 @@ Copy the example config into your project's `.mcp.json`:
       "env": {
         "MY_ROLE": "frontend",
         "REMOTE_HOST": "MACHINE_A_IP:8788",
-        "INTERCOM_SECRET": "your-shared-secret",
+        "INTERCOM_SECRET": "${INTERCOM_SECRET}",
         "INTERCOM_PORT": "8788"
       }
     }
@@ -190,7 +204,7 @@ Claude will use the `send_message` tool to POST the message to the other machine
 "REMOTE_HOST": "other-machine:8788"
 ```
 
-This is strictly better than exposing a port to the internet: no public listener, no port forwarding, the address doesn't change when your ISP reassigns your IP, and device identity is enforced by Tailscale rather than resting entirely on a shared string. Set `hostname` to `127.0.0.1` in `Bun.serve` if you want to be certain nothing outside the tailnet can reach it at all.
+This is strictly better than exposing a port to the internet: no public listener, no port forwarding, the address doesn't change when your ISP reassigns your IP, and device identity is enforced by Tailscale rather than resting entirely on a shared string. Set `INTERCOM_HOST` to your tailnet address — or to `127.0.0.1` if you are also fronting it with a tunnel — to be certain nothing outside can reach it at all.
 
 <details>
 <summary>Alternative: ngrok</summary>
@@ -206,7 +220,9 @@ ngrok http 8788
 "REMOTE_HOST": "your-subdomain.ngrok-free.app"
 ```
 
-The intercom auto-detects ngrok URLs and switches to HTTPS. Note this does put a publicly reachable endpoint in front of your Claude session, gated only by the shared secret — pick a strong one.
+ngrok hostnames are detected and switched to HTTPS automatically. For any other tunnel — Cloudflare, Caddy, a reverse proxy of your own — write the scheme into `REMOTE_HOST` explicitly (`https://your-host`), or the secret goes out over cleartext HTTP.
+
+Note this does put a publicly reachable endpoint in front of your Claude session, gated only by the shared secret — pick a strong one, and consider `INTERCOM_HOST=127.0.0.1` so only the tunnel can reach the listener.
 
 </details>
 
@@ -243,9 +259,10 @@ Every message sits in one of three states:
 | Environment Variable | Required | Default | Description |
 |---------------------|----------|---------|-------------|
 | `MY_ROLE` | Yes | `developer-a` | Label for this instance (appears in message tags) |
-| `REMOTE_HOST` | Yes | `localhost:8789` | Address of the other machine (`host:port` or tunnel URL) |
-| `INTERCOM_SECRET` | Yes | `change-me-in-production` | Shared secret — must match on both sides |
+| `REMOTE_HOST` | Yes | `localhost:8789` | Address of the other machine (`host:port` or tunnel URL). Include `https://` for any TLS tunnel that isn't ngrok |
+| `INTERCOM_SECRET` | Yes | *none* | Shared secret — must match on both sides. There is no default: unset, left as a docs placeholder, or an unexpanded `${VAR}`, and the intercom refuses to pair |
 | `INTERCOM_PORT` | No | `8788` | Port to listen on for incoming messages |
+| `INTERCOM_HOST` | No | `0.0.0.0` | Interface to bind the listener to. Use `127.0.0.1` when a tunnel fronts it |
 | `INTERCOM_SEND_TIMEOUT_MS` | No | `10000` | How long an outbound POST may hang before giving up |
 
 ## How It Works
@@ -262,10 +279,13 @@ The stdio leg is not an implementation detail you can swap for HTTP. It is what 
 
 ## Security
 
-- **Shared secret authentication**: Every message requires an `X-Intercom-Secret` header matching the configured secret. Requests without it get a `401 Unauthorized`.
+- **Shared secret authentication**: `POST /message` requires an `X-Intercom-Secret` header matching the configured secret, compared in constant time. Anything else gets a `401 Unauthorized`. `GET /health` is deliberately *not* authenticated, so you can verify a tunnel end to end — it reports this instance's role and version to anyone who asks, so treat a reachable intercom as discoverable.
+- **The secret is only as private as the transport**: it is sent as a plaintext header on every message. Over Tailscale (WireGuard) or an HTTPS tunnel that is fine. Over plain HTTP on a shared network, anyone on the path can read it and then use it.
+- **No replay protection**: messages carry an `id` and a `timestamp`, but neither is checked for freshness or reuse. Someone who captures a single authenticated request on a cleartext link can resend it verbatim, as often as they like.
+- **No default secret**: `INTERCOM_SECRET` has no fallback value. Leave it unset, leave a docs placeholder in place, or reference a `${VAR}` you never exported, and the intercom starts *unpaired* — it binds no port and `send_message` refuses, explaining why. The unexpanded-`${VAR}` case matters because Claude Code passes a missing variable through as literal text, which would otherwise give both machines the same guessable secret.
 - **Inbound is treated as data, not instructions**: the server tells the receiving Claude that a channel message comes from another person's session — it can't approve anything, can't change configuration, a slash command in the text is inert, and requests for credentials or env files should be refused and surfaced to you.
 - **No data persistence**: Messages are forwarded in real-time and not stored.
-- **Localhost binding optional**: By default listens on `0.0.0.0` for cross-machine access. Set to `127.0.0.1` if using a tunnel.
+- **Configurable bind address**: By default listens on `0.0.0.0` for cross-machine access. Set `INTERCOM_HOST=127.0.0.1` when a tunnel is doing the reaching, so only the tunnel can connect.
 
 > **Warning**: Those instructions are a default, not a boundary. You cannot fix prompt injection with prompt instructions — anyone holding your secret and address can put text into your Claude session, and the only real limits are that session's own permission prompts. Native cross-session messaging enforces this properly with hold/accept/refuse inbound controls; this does not. Use a strong secret, keep it off the public internet, and don't pair with a peer you wouldn't hand a terminal to.
 
@@ -289,6 +309,8 @@ The stdio leg is not an implementation detail you can swap for HTTP. It is what 
 ```
 
 `id` and `replyTo` are optional — a message without them still delivers, it just can't be correlated.
+
+The body is schema-validated before anything reaches your session. `content` is required and capped at 32,000 characters; `id` and `replyTo` must look like machine ids (`[A-Za-z0-9_-]`, ≤64); `role` and `timestamp` may not contain `< > " '` or any Unicode control, zero-width, or bidi-override character, because those are what a sender would use to forge the `<channel …>` wrapper the message is rendered inside. Anything else gets a `400`, and a body over 64 KB gets a `413`.
 
 ## Use Cases
 
