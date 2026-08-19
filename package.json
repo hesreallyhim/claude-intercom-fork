@@ -1,6 +1,6 @@
 {
   "name": "claude-intercom",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "mcpName": "io.github.MuhammadTalhaMT/intercom",
   "description": "Two-way communication bridge between Claude Code sessions using the Channels API",
   "main": "intercom.ts",

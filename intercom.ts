@@ -193,7 +193,7 @@ const describe = (t: Tracked): string => {
 // listener for it and surfaces incoming events in the conversation.
 
 const mcp = new Server(
-  { name: 'intercom', version: '2.0.0' },
+  { name: 'intercom', version: '2.1.0' },
   {
     capabilities: {
       experimental: { 'claude/channel': {} },
@@ -409,7 +409,7 @@ const handleRequest = async (req: Request): Promise<Response> => {
 
   // Health check — useful for verifying the tunnel/connection
   if (req.method === 'GET' && url.pathname === '/health') {
-    return new Response(JSON.stringify({ status: 'ok', role: MY_ROLE, version: '2.0.0' }), {
+    return new Response(JSON.stringify({ status: 'ok', role: MY_ROLE, version: '2.1.0' }), {
       headers: { 'Content-Type': 'application/json' },
     })
   }
